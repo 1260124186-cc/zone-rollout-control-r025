@@ -47,17 +47,8 @@ func (s *Service) Evaluate(
 					"assessment_id": existingID,
 				})
 			}
-			change := domain.ApplyAssessmentPointer(&plan, existing, true)
-			if change.Changed {
-				state.Plans[planID] = plan
-				store.AddAudit(state, s.ids, "assessment", existing.ID, "replayed", now, map[string]any{
-					"plan_id":         planID,
-					"previous_id":     change.PreviousID,
-					"previous_seq":    change.PreviousSeq,
-					"assessment_seq":  change.CurrentSeq,
-					"current_pointer": change.CurrentID,
-				})
-			}
+			// 重放只返回首次事实：计划的最新判定、版本和操作历史
+			// 都必须保持在重放发生之前的状态，不能让更早的判定倒退指针。
 			result = existing
 			return nil
 		}
@@ -88,7 +79,7 @@ func (s *Service) Evaluate(
 		result.AssessmentSeq = domain.NextAssessmentSeq(plan)
 		state.Assessments[result.ID] = result
 		state.AssessmentRequestKeys[requestIndex] = result.ID
-		domain.ApplyAssessmentPointer(&plan, result, false)
+		domain.RecordAssessment(&plan, result)
 		state.Plans[planID] = plan
 		store.AddAudit(state, s.ids, "assessment", result.ID, "completed", now, map[string]any{
 			"plan_id":        planID,

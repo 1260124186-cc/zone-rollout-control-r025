@@ -40,74 +40,24 @@ func CompletePlan(plan *RolloutPlan, now time.Time) error {
 	return nil
 }
 
-type AssessmentPointerChange struct {
-	PreviousID  string
-	PreviousSeq uint64
-	CurrentID   string
-	CurrentSeq  uint64
-	Changed     bool
-}
-
 func NextAssessmentSeq(plan RolloutPlan) uint64 {
 	return plan.LatestAssessmentSeq + 1
 }
 
-func ApplyAssessmentPointer(
-	plan *RolloutPlan,
-	assessment RolloutAssessment,
-	replay bool,
-) AssessmentPointerChange {
-	change := AssessmentPointerChange{
-		PreviousID:  plan.LatestAssessmentID,
-		PreviousSeq: plan.LatestAssessmentSeq,
-		CurrentID:   plan.LatestAssessmentID,
-		CurrentSeq:  plan.LatestAssessmentSeq,
-	}
+// RecordAssessment 把一次全新完成的判定登记为计划的最新判定。
+// 只有判定序号严格更新时才推进指针和计划版本；重放已存在的判定或
+// 更早的判定不会让最新指针倒退，也不会推进版本。
+func RecordAssessment(plan *RolloutPlan, assessment RolloutAssessment) bool {
 	if assessment.PlanID != plan.ID {
-		return change
+		return false
 	}
-	if !replay &&
-		plan.LatestAssessmentID == assessment.ID &&
-		plan.LatestAssessmentSeq == assessment.AssessmentSeq {
-		return change
+	if assessment.AssessmentSeq <= plan.LatestAssessmentSeq {
+		return false
 	}
 	plan.LatestAssessmentID = assessment.ID
 	plan.LatestAssessmentSeq = assessment.AssessmentSeq
 	plan.Version++
-	change.CurrentID = assessment.ID
-	change.CurrentSeq = assessment.AssessmentSeq
-	change.Changed = true
-	return change
-}
-
-func CurrentAssessment(
-	plan RolloutPlan,
-	assessments map[string]RolloutAssessment,
-) (RolloutAssessment, bool) {
-	if plan.LatestAssessmentID == "" {
-		return RolloutAssessment{}, false
-	}
-	assessment, ok := assessments[plan.LatestAssessmentID]
-	if !ok || assessment.PlanID != plan.ID {
-		return RolloutAssessment{}, false
-	}
-	return assessment, true
-}
-
-func ReapplyCurrentAssessment(
-	plan *RolloutPlan,
-	assessments map[string]RolloutAssessment,
-) AssessmentPointerChange {
-	assessment, ok := CurrentAssessment(*plan, assessments)
-	if !ok {
-		return AssessmentPointerChange{
-			PreviousID:  plan.LatestAssessmentID,
-			PreviousSeq: plan.LatestAssessmentSeq,
-			CurrentID:   plan.LatestAssessmentID,
-			CurrentSeq:  plan.LatestAssessmentSeq,
-		}
-	}
-	return ApplyAssessmentPointer(plan, assessment, true)
+	return true
 }
 
 func LeaseFingerprint(planID string, input LeaseInput) string {

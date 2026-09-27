@@ -71,11 +71,52 @@ func newHarness() (*harness, error) {
 }
 
 func (h *harness) close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = h.server.Shutdown(ctx)
-	_ = h.listener.Close()
+	h.shutdown()
 	_ = os.RemoveAll(h.tempDir)
+}
+
+func (h *harness) shutdown() {
+	if h.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = h.server.Shutdown(ctx)
+		h.server = nil
+	}
+	if h.listener != nil {
+		_ = h.listener.Close()
+		h.listener = nil
+	}
+}
+
+// restart 在保留同一份状态快照和时钟的前提下重启服务，
+// 用于验证修复结果已持久化、重启后依然可读。
+func (h *harness) restart() error {
+	h.shutdown()
+	stateStore, err := store.Open(h.tempDir + "/state.json")
+	if err != nil {
+		return fmt.Errorf("reopen temporary store: %w", err)
+	}
+	ids := platform.CryptoIDGenerator{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	plans := plan.New(stateStore, h.clock, ids)
+	nodes := fleet.New(stateStore, h.clock, ids)
+	allocations := allocation.New(stateStore, h.clock, ids)
+	probes := probe.New(stateStore, h.clock, ids, allocations)
+	assessments := assessment.New(stateStore, h.clock, ids)
+	api := httpapi.New(plans, nodes, allocations, probes, assessments, ids, logger)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("relisten: %w", err)
+	}
+	server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	h.baseURL = "http://" + listener.Addr().String()
+	h.server = server
+	h.listener = listener
+	return nil
 }
 
 func (h *harness) call(method string, path string, requestBody any, target any) error {

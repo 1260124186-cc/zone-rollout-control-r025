@@ -174,7 +174,6 @@ func (s *Service) Get(ctx context.Context, planID string) (domain.RolloutPlan, e
 		if !ok {
 			return domain.NotFound("plan", planID)
 		}
-		domain.ReapplyCurrentAssessment(&found, state.Assessments)
 		plan = found
 		return nil
 	})
